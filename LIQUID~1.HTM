@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Liquid Projection Room — 水中投影シミュレーター</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#000;height:100%;width:100%;font-family:'Helvetica Neue',Arial,sans-serif;}
+  canvas{display:block;}
+  #ui{
+    position:fixed; top:0; left:0; width:300px; max-height:100vh; overflow-y:auto;
+    background:rgba(4,8,10,0.72); color:#e4f6ff; padding:16px 18px; box-sizing:border-box;
+    backdrop-filter:blur(6px); font-size:12px; z-index:10; transition:opacity .3s, transform .3s;
+    border-right:1px solid rgba(140,220,255,0.15);
+  }
+  #ui.closed{opacity:0; transform:translateX(-100%); pointer-events:none;}
+  #ui h1{font-size:14px; margin:0 0 4px; letter-spacing:.04em; color:#8fd8ff; font-weight:600;}
+  #ui p.sub{margin:0 0 14px; opacity:.6; font-size:11px; line-height:1.6;}
+  .row{margin-bottom:12px;}
+  .row label{display:flex; justify-content:space-between; margin-bottom:4px; opacity:.85;}
+  .row input[type=range]{width:100%; accent-color:#6fd8ff;}
+  .btnrow{display:flex; gap:6px; margin-bottom:10px;}
+  button{
+    flex:1; background:#0d1e22; color:#c8f0ff; border:1px solid #234a52; border-radius:4px;
+    padding:8px 6px; font-size:11px; cursor:pointer; letter-spacing:.02em;
+  }
+  button:hover{background:#123037; border-color:#6fd8ff;}
+  select{width:100%; background:#0d1e22; color:#c8f0ff; border:1px solid #234a52; border-radius:4px; padding:6px; font-size:11px; margin-bottom:10px;}
+  input[type=file]{display:none;}
+  #hint{
+    position:fixed; bottom:14px; left:14px; color:rgba(255,255,255,.35); font-size:11px; z-index:10;
+    transition:opacity .3s;
+  }
+  #hint.closed{opacity:0;}
+  #menuBtn{
+    display:none; position:fixed; top:14px; left:14px; z-index:20;
+    width:40px; height:40px; border-radius:8px; border:1px solid rgba(140,220,255,0.25);
+    background:rgba(4,8,10,0.72); backdrop-filter:blur(6px); color:#8fd8ff;
+    font-size:18px; line-height:1; cursor:pointer;
+  }
+  /* Mobile default state enforced purely by CSS — no JS load-order dependency. */
+  @media (max-width: 768px){
+    #menuBtn{ display:block; }
+    #ui{
+      width:min(300px, 86vw);
+      max-height: calc(100vh - 84px);
+      max-height: calc(100dvh - 84px);
+      padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    #ui:not(.open){ opacity:0; transform:translateX(-100%); pointer-events:none; }
+    #hint{ bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+    #hint:not(.open){ opacity:0; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="menuBtn" aria-label="設定を開く">&#9776;</button>
+
+<div id="ui">
+  <h1>LIQUID PROJECTION ROOM</h1>
+  <p class="sub">映像を水槽に投影し、波紋越しに見ているような質感をリアルタイム生成します。画面をクリック/タップすると波紋が広がります。</p>
+
+  <div class="btnrow">
+    <button id="btnCam">Webカメラ開始</button>
+    <button id="btnFile">動画/画像を読込</button>
+  </div>
+  <input type="file" id="fileInput" accept="video/*,image/*">
+
+  <select id="tint">
+    <option value="cyan">シアン×ブルー(水槽)</option>
+    <option value="violet">バイオレット×マゼンタ</option>
+    <option value="amber">アンバー×琥珀</option>
+  </select>
+
+  <div class="row">
+    <label><span>波紋の強さ</span><span id="vRipple">1.0</span></label>
+    <input type="range" id="ripple" min="0.2" max="2.5" step="0.05" value="1.0">
+  </div>
+  <div class="row">
+    <label><span>波の減衰(長く残る↔早く消える)</span><span id="vDamp">0.988</span></label>
+    <input type="range" id="damp" min="0.95" max="0.998" step="0.001" value="0.988">
+  </div>
+  <div class="row">
+    <label><span>自動で生まれる波紋の頻度</span><span id="vAuto">0.6</span></label>
+    <input type="range" id="auto" min="0" max="2" step="0.05" value="0.6">
+  </div>
+  <div class="row">
+    <label><span>屈折の強さ</span><span id="vRefract">1.0</span></label>
+    <input type="range" id="refract" min="0" max="3" step="0.05" value="1.0">
+  </div>
+  <div class="row">
+    <label><span>色収差(光の分散)</span><span id="vChroma">0.5</span></label>
+    <input type="range" id="chroma" min="0" max="1.5" step="0.05" value="0.5">
+  </div>
+  <div class="row">
+    <label><span>コースティクス(光の網目模様)</span><span id="vCaustic">0.8</span></label>
+    <input type="range" id="caustic" min="0" max="2" step="0.05" value="0.8">
+  </div>
+  <div class="row">
+    <label><span>水色の濃さ</span><span id="vTintAmt">0.4</span></label>
+    <input type="range" id="tintAmt" min="0" max="1" step="0.02" value="0.4">
+  </div>
+  <div class="row">
+    <label><span>気泡の量</span><span id="vBubbles">1.0</span></label>
+    <input type="range" id="bubbles" min="0" max="2" step="0.05" value="1.0">
+  </div>
+  <div class="row">
+    <label><span>ゆっくりズーム(演出)</span><span id="vZoom">0.3</span></label>
+    <input type="range" id="zoom" min="0" max="1" step="0.02" value="0.3">
+  </div>
+</div>
+
+<div id="hint">H キーでUIの表示/非表示 &nbsp;|&nbsp; クリック/タップで波紋 &nbsp;|&nbsp; 画面録画してループ映像に</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.autoClear = true;
+
+const orthoCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const finalScene = new THREE.Scene();
+const simSceneA = new THREE.Scene();
+
+// ============ simulation render targets (ping-pong) ============
+const SIM_RES = 384;
+function makeRT(){
+  return new THREE.WebGLRenderTarget(SIM_RES, SIM_RES, {
+    type: THREE.HalfFloatType || THREE.FloatType,
+    format: THREE.RGBAFormat,
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping,
+  });
+}
+let rtA = makeRT(), rtB = makeRT();
+
+const MAX_SPLATS = 8;
+const splatData = new Array(MAX_SPLATS).fill(0).map(()=> new THREE.Vector4(0,0,-10,0));
+let splatIdx = 0;
+function addSplat(u, v, strength){
+  splatData[splatIdx].set(u, v, clock.getElapsedTime(), strength);
+  splatIdx = (splatIdx+1) % MAX_SPLATS;
+}
+
+const simUniforms = {
+  uPrev: { value: null },
+  uTexel: { value: new THREE.Vector2(1/SIM_RES, 1/SIM_RES) },
+  uDamping: { value: 0.988 },
+  uTime: { value: 0 },
+  uSplats: { value: splatData },
+};
+const simMat = new THREE.ShaderMaterial({
+  uniforms: simUniforms,
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }`,
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform sampler2D uPrev;
+    uniform vec2 uTexel;
+    uniform float uDamping, uTime;
+    uniform vec4 uSplats[${MAX_SPLATS}];
+    void main(){
+      vec4 c = texture2D(uPrev, vUv);
+      float h = c.r, hPrev = c.g;
+      float hl = texture2D(uPrev, vUv - vec2(uTexel.x,0.0)).r;
+      float hr = texture2D(uPrev, vUv + vec2(uTexel.x,0.0)).r;
+      float hu = texture2D(uPrev, vUv + vec2(0.0,uTexel.y)).r;
+      float hd = texture2D(uPrev, vUv - vec2(0.0,uTexel.y)).r;
+      float newH = (hl+hr+hu+hd)*0.5 - hPrev;
+      newH *= uDamping;
+      for(int i=0;i<${MAX_SPLATS};i++){
+        vec4 s = uSplats[i];
+        float age = uTime - s.z;
+        if(age >= 0.0 && age < 0.18){
+          float d = distance(vUv, s.xy);
+          float bump = exp(-d*d*700.0) * s.w * (1.0 - age/0.18);
+          newH += bump;
+        }
+      }
+      gl_FragColor = vec4(newH, h, 0.0, 1.0);
+    }
+  `,
+});
+const simQuad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), simMat);
+simSceneA.add(simQuad);
+
+// clear both RTs to zero initially
+function clearRT(rt){
+  renderer.setRenderTarget(rt);
+  renderer.setClearColor(0x000000, 1);
+  renderer.clear();
+}
+clearRT(rtA); clearRT(rtB);
+
+// ============ video / placeholder source ============
+const placeholderCanvas = document.createElement('canvas');
+placeholderCanvas.width = 512; placeholderCanvas.height = 512;
+const pctx = placeholderCanvas.getContext('2d');
+function drawPlaceholder(t){
+  const w=512,h=512;
+  pctx.fillStyle = '#04070a'; pctx.fillRect(0,0,w,h);
+  // simple silhouette figure suggesting a dancer, as stand-in footage
+  pctx.save();
+  pctx.translate(w/2, h/2+40);
+  const sway = Math.sin(t*0.9)*0.25;
+  pctx.rotate(sway*0.3);
+  pctx.fillStyle = '#cfeeff';
+  // torso
+  pctx.beginPath(); pctx.ellipse(0,-40,26,70,0,0,Math.PI*2); pctx.fill();
+  // head
+  pctx.beginPath(); pctx.arc(0,-130,22,0,Math.PI*2); pctx.fill();
+  // arms
+  const armA = Math.sin(t*1.1)*1.1;
+  pctx.save(); pctx.translate(-20,-70); pctx.rotate(-1.1+armA);
+  pctx.fillRect(-8,0,16,90); pctx.restore();
+  pctx.save(); pctx.translate(20,-70); pctx.rotate(1.1-armA);
+  pctx.fillRect(-8,0,16,90); pctx.restore();
+  // legs
+  const legA = Math.cos(t*0.9)*0.5;
+  pctx.save(); pctx.translate(-14,25); pctx.rotate(legA);
+  pctx.fillRect(-9,0,18,120); pctx.restore();
+  pctx.save(); pctx.translate(14,25); pctx.rotate(-legA);
+  pctx.fillRect(-9,0,18,120); pctx.restore();
+  pctx.restore();
+}
+drawPlaceholder(0);
+const placeholderTex = new THREE.CanvasTexture(placeholderCanvas);
+
+let sourceTex = placeholderTex;
+let usingPlaceholder = true;
+let videoEl = null;
+
+// ============ final composite pass ============
+const finalUniforms = {
+  uSim: { value: null },
+  uVideo: { value: sourceTex },
+  uTexel: { value: new THREE.Vector2(1/SIM_RES, 1/SIM_RES) },
+  uRefract: { value: 1.0 },
+  uChroma: { value: 0.5 },
+  uCaustic: { value: 0.8 },
+  uTint: { value: new THREE.Color(0x4fc3ff) },
+  uTintAmt: { value: 0.4 },
+  uZoom: { value: 0.3 },
+  uTime: { value: 0 },
+};
+const finalMat = new THREE.ShaderMaterial({
+  uniforms: finalUniforms,
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }`,
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform sampler2D uSim, uVideo;
+    uniform vec2 uTexel;
+    uniform float uRefract, uChroma, uCaustic, uTintAmt, uZoom, uTime;
+    uniform vec3 uTint;
+    void main(){
+      vec2 uv = vUv;
+      // slow cinematic zoom/pan
+      float z = 1.0 - uZoom*0.15*(0.5+0.5*sin(uTime*0.05));
+      vec2 zuv = (uv-0.5)*z + 0.5 + vec2(sin(uTime*0.03), cos(uTime*0.025))*uZoom*0.02;
+
+      float hl = texture2D(uSim, zuv - vec2(uTexel.x,0.0)).r;
+      float hr = texture2D(uSim, zuv + vec2(uTexel.x,0.0)).r;
+      float hu = texture2D(uSim, zuv + vec2(0.0,uTexel.y)).r;
+      float hd = texture2D(uSim, zuv - vec2(0.0,uTexel.y)).r;
+      vec2 grad = vec2(hr-hl, hu-hd);
+
+      vec2 refUV = clamp(zuv + grad*uRefract*0.6, 0.0, 1.0);
+      float ca = uChroma*0.015;
+      vec3 col;
+      col.r = texture2D(uVideo, clamp(refUV+grad*ca,0.0,1.0)).r;
+      col.g = texture2D(uVideo, clamp(refUV,0.0,1.0)).g;
+      col.b = texture2D(uVideo, clamp(refUV-grad*ca,0.0,1.0)).b;
+
+      float center = texture2D(uSim, zuv).r;
+      float lap = (hl+hr+hu+hd) - 4.0*center;
+      float caustic = max(lap, 0.0) * uCaustic * 6.0;
+      col += vec3(0.65,0.9,1.0) * caustic;
+
+      col = mix(col, col*uTint*1.4, uTintAmt);
+
+      float d = distance(uv, vec2(0.5));
+      col *= smoothstep(0.78, 0.2, d);
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+const finalQuad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), finalMat);
+finalScene.add(finalQuad);
+
+// ============ bubbles ============
+function makeGlowTexture(){
+  const s=128; const cv=document.createElement('canvas'); cv.width=cv.height=s;
+  const ctx=cv.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.4,'rgba(255,255,255,0.6)'); g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,s,s);
+  return new THREE.CanvasTexture(cv);
+}
+const glowTex = makeGlowTexture();
+const bubbleScene = new THREE.Scene();
+const bubbleCam = new THREE.PerspectiveCamera(50, 1, 0.1, 20);
+bubbleCam.position.z = 6;
+let bubblePoints;
+function buildBubbles(density){
+  if(bubblePoints) bubbleScene.remove(bubblePoints);
+  const n = Math.floor(220*density);
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(n*3);
+  for(let i=0;i<n;i++){
+    pos[i*3] = (Math.random()-0.5)*8;
+    pos[i*3+1] = (Math.random()-0.5)*6;
+    pos[i*3+2] = (Math.random())*4 - 2;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  const mat = new THREE.PointsMaterial({
+    size:0.08, map:glowTex, color:0xbfe9ff, transparent:true, opacity:0.5,
+    blending:THREE.AdditiveBlending, depthWrite:false, sizeAttenuation:true,
+  });
+  bubblePoints = new THREE.Points(geo, mat);
+  bubbleScene.add(bubblePoints);
+}
+buildBubbles(1.0);
+
+// composite bubbles on top via a second render pass with alpha blending onto same canvas
+renderer.autoClear = false;
+
+const clock = new THREE.Clock();
+let autoRippleAccum = 0;
+let params = { autoRate: 0.6, rippleStrength: 1.0 };
+
+function resize(){
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  bubbleCam.aspect = window.innerWidth/window.innerHeight;
+  bubbleCam.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  if(usingPlaceholder){
+    drawPlaceholder(t);
+    placeholderTex.needsUpdate = true;
+  } else if(videoEl && videoEl.readyState >= (videoEl.HAVE_CURRENT_DATA||2)){
+    sourceTex.needsUpdate = true;
+  }
+
+  // ambient auto ripples
+  autoRippleAccum += dt * params.autoRate;
+  if(autoRippleAccum > 1.0){
+    autoRippleAccum = 0;
+    addSplat(0.15+Math.random()*0.7, 0.15+Math.random()*0.7, params.rippleStrength*(0.5+Math.random()*0.6));
+  }
+
+  // simulation step: rtA -> rtB
+  simUniforms.uPrev.value = rtA.texture;
+  simUniforms.uTime.value = t;
+  renderer.setRenderTarget(rtB);
+  renderer.render(simSceneA, orthoCam);
+  const tmp = rtA; rtA = rtB; rtB = tmp;
+
+  // final composite to screen
+  finalUniforms.uSim.value = rtA.texture;
+  finalUniforms.uTime.value = t;
+  renderer.setRenderTarget(null);
+  renderer.clear();
+  renderer.render(finalScene, orthoCam);
+
+  // bubbles overlay
+  if(bubblePoints){
+    const pos = bubblePoints.geometry.attributes.position;
+    for(let i=0;i<pos.count;i++){
+      let y = pos.getY(i) + dt*0.25;
+      if(y>3) y=-3;
+      pos.setY(i,y);
+    }
+    pos.needsUpdate = true;
+  }
+  renderer.render(bubbleScene, bubbleCam);
+
+  renderer.setRenderTarget(null);
+}
+animate();
+
+// ============ interaction: click/tap to ripple ============
+function screenToUV(x,y){
+  const rect = canvas.getBoundingClientRect();
+  const u = (x-rect.left)/rect.width;
+  const v = 1.0 - (y-rect.top)/rect.height;
+  return [u,v];
+}
+canvas.addEventListener('pointerdown', (e)=>{
+  const [u,v] = screenToUV(e.clientX, e.clientY);
+  addSplat(u,v, params.rippleStrength*1.6);
+});
+
+// ============ UI wiring ============
+document.getElementById('ripple').addEventListener('input', (e)=>{ params.rippleStrength = parseFloat(e.target.value); document.getElementById('vRipple').textContent = e.target.value; });
+document.getElementById('damp').addEventListener('input', (e)=>{ simUniforms.uDamping.value = parseFloat(e.target.value); document.getElementById('vDamp').textContent = e.target.value; });
+document.getElementById('auto').addEventListener('input', (e)=>{ params.autoRate = parseFloat(e.target.value); document.getElementById('vAuto').textContent = e.target.value; });
+document.getElementById('refract').addEventListener('input', (e)=>{ finalUniforms.uRefract.value = parseFloat(e.target.value); document.getElementById('vRefract').textContent = e.target.value; });
+document.getElementById('chroma').addEventListener('input', (e)=>{ finalUniforms.uChroma.value = parseFloat(e.target.value); document.getElementById('vChroma').textContent = e.target.value; });
+document.getElementById('caustic').addEventListener('input', (e)=>{ finalUniforms.uCaustic.value = parseFloat(e.target.value); document.getElementById('vCaustic').textContent = e.target.value; });
+document.getElementById('tintAmt').addEventListener('input', (e)=>{ finalUniforms.uTintAmt.value = parseFloat(e.target.value); document.getElementById('vTintAmt').textContent = e.target.value; });
+document.getElementById('zoom').addEventListener('input', (e)=>{ finalUniforms.uZoom.value = parseFloat(e.target.value); document.getElementById('vZoom').textContent = e.target.value; });
+document.getElementById('bubbles').addEventListener('input', (e)=>{ buildBubbles(parseFloat(e.target.value)); document.getElementById('vBubbles').textContent = e.target.value; });
+
+const TINTS = { cyan:0x4fc3ff, violet:0xa06bff, amber:0xffb35a };
+document.getElementById('tint').addEventListener('change', (e)=>{
+  finalUniforms.uTint.value = new THREE.Color(TINTS[e.target.value]);
+});
+
+document.getElementById('btnCam').addEventListener('click', async ()=>{
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:1280, height:720 } });
+    videoEl = document.createElement('video');
+    videoEl.srcObject = stream; videoEl.muted = true; videoEl.playsInline = true;
+    await videoEl.play();
+    setActiveVideo(videoEl);
+  }catch(e){
+    alert('カメラを開始できませんでした: ' + e.message);
+  }
+});
+document.getElementById('btnFile').addEventListener('click', ()=> document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  if(file.type.startsWith('video')){
+    videoEl = document.createElement('video');
+    videoEl.src = url; videoEl.loop = true; videoEl.muted = true; videoEl.playsInline = true;
+    videoEl.play();
+    setActiveVideo(videoEl);
+  } else if(file.type.startsWith('image')){
+    const img = new Image();
+    img.onload = ()=>{
+      const tex = new THREE.Texture(img);
+      tex.needsUpdate = true;
+      usingPlaceholder = false;
+      sourceTex = tex;
+      finalUniforms.uVideo.value = tex;
+    };
+    img.src = url;
+  }
+});
+function setActiveVideo(v){
+  const tex = new THREE.VideoTexture(v);
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+  usingPlaceholder = false;
+  sourceTex = tex;
+  finalUniforms.uVideo.value = tex;
+}
+
+// ============ mobile menu toggle ============
+let uiOpen = !window.matchMedia('(max-width: 768px)').matches;
+function setUiOpen(open){
+  uiOpen = open;
+  document.getElementById('ui').classList.toggle('open', open);
+  document.getElementById('ui').classList.toggle('closed', !open);
+  document.getElementById('hint').classList.toggle('open', open);
+  document.getElementById('hint').classList.toggle('closed', !open);
+}
+window.addEventListener('keydown', (e)=>{
+  if(e.key.toLowerCase()==='h') setUiOpen(!uiOpen);
+});
+document.getElementById('menuBtn').addEventListener('click', ()=> setUiOpen(!uiOpen));
+</script>
+</body>
+</html>
