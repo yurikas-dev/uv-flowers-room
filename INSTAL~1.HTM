@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Installation Studio — Virtual Projection Simulator (Mockup)</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#000;height:100%;width:100%;font-family:'Helvetica Neue',Arial,sans-serif;}
+  canvas{display:block;}
+  #ui{
+    position:fixed; top:0; left:0; width:320px; max-height:100vh; overflow-y:auto;
+    background:rgba(6,8,12,0.78); color:#eaf2ff; padding:16px 18px; box-sizing:border-box;
+    backdrop-filter:blur(6px); font-size:12px; z-index:10; transition:opacity .3s, transform .3s;
+    border-right:1px solid rgba(140,180,255,0.15);
+  }
+  #ui.closed{opacity:0; transform:translateX(-100%); pointer-events:none;}
+  #ui h1{font-size:14px; margin:0 0 2px; letter-spacing:.03em; color:#8fb4ff; font-weight:600;}
+  #ui p.sub{margin:0 0 14px; opacity:.55; font-size:10.5px; line-height:1.6;}
+  h2.sec{font-size:11px; margin:16px 0 8px; color:#8fb4ff; letter-spacing:.08em; text-transform:uppercase; opacity:.85; border-bottom:1px solid rgba(140,180,255,0.15); padding-bottom:4px;}
+  h2.sec:first-of-type{margin-top:0;}
+  .row{margin-bottom:11px;}
+  .row label{display:flex; justify-content:space-between; margin-bottom:4px; opacity:.85;}
+  .row input[type=range]{width:100%; accent-color:#7fa8ff;}
+  .btnrow{display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap;}
+  button{
+    flex:1; min-width:70px; background:#101623; color:#cfe0ff; border:1px solid #263455; border-radius:4px;
+    padding:8px 6px; font-size:11px; cursor:pointer; letter-spacing:.02em;
+  }
+  button:hover{background:#182238; border-color:#7fa8ff;}
+  button.active{background:#233258; border-color:#8fb4ff; color:#fff;}
+  button.record{background:#2a1216; border-color:#7a2530; color:#ffb8c0;}
+  button.record.on{background:#5a1620; border-color:#ff4d5e; color:#fff;}
+  select{width:100%; background:#101623; color:#cfe0ff; border:1px solid #263455; border-radius:4px; padding:6px; font-size:11px; margin-bottom:10px;}
+  input[type=file]{display:none;}
+  #hint{
+    position:fixed; bottom:14px; left:14px; color:rgba(255,255,255,.35); font-size:11px; z-index:10;
+    transition:opacity .3s;
+  }
+  #hint.closed{opacity:0;}
+  #menuBtn{
+    display:none; position:fixed; top:14px; left:14px; z-index:20;
+    width:40px; height:40px; border-radius:8px; border:1px solid rgba(140,180,255,0.25);
+    background:rgba(6,8,12,0.78); backdrop-filter:blur(6px); color:#8fb4ff;
+    font-size:18px; line-height:1; cursor:pointer;
+  }
+  #recIndicator{
+    position:fixed; top:14px; right:14px; z-index:20; display:none;
+    background:rgba(90,20,30,0.85); color:#fff; padding:8px 12px; border-radius:20px;
+    font-size:11px; align-items:center; gap:6px;
+  }
+  #recIndicator.show{display:flex;}
+  #recDot{width:8px; height:8px; border-radius:50%; background:#ff4d5e; animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  @media (max-width: 768px){
+    #menuBtn{ display:block; }
+    #ui{
+      width:min(320px, 86vw);
+      max-height: calc(100vh - 84px);
+      max-height: calc(100dvh - 84px);
+      padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    #ui:not(.open){ opacity:0; transform:translateX(-100%); pointer-events:none; }
+    #hint{ bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+    #hint:not(.open){ opacity:0; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="menuBtn" aria-label="設定を開く">&#9776;</button>
+<div id="recIndicator"><span id="recDot"></span><span id="recTime">0:00</span> REC</div>
+
+<div id="ui">
+  <h1>INSTALLATION STUDIO</h1>
+  <p class="sub">Virtual Projection Simulator — mockup<br>プロジェクター・水槽・観客視点をパラメータ化し、実機を使わずに展示イメージを検証するための設計ツールの試作です。</p>
+
+  <h2 class="sec">Room</h2>
+  <select id="roomType">
+    <option value="blackbox">Black Box(暗室)</option>
+    <option value="gallery">Gallery(白壁)</option>
+    <option value="museum">Museum(石壁)</option>
+  </select>
+
+  <h2 class="sec">Projector</h2>
+  <div class="row">
+    <label><span>高さ (Height)</span><span id="vPHeight">3.2m</span></label>
+    <input type="range" id="pHeight" min="1.5" max="5" step="0.1" value="3.2">
+  </div>
+  <div class="row">
+    <label><span>俯角 (Angle)</span><span id="vPAngle">55°</span></label>
+    <input type="range" id="pAngle" min="20" max="85" step="1" value="55">
+  </div>
+  <div class="row">
+    <label><span>水槽からの距離</span><span id="vPDist">2.4m</span></label>
+    <input type="range" id="pDist" min="1.0" max="5" step="0.1" value="2.4">
+  </div>
+  <div class="row">
+    <label><span>レンズ画角 (FOV)</span><span id="vPFov">38°</span></label>
+    <input type="range" id="pFov" min="15" max="70" step="1" value="38">
+  </div>
+
+  <h2 class="sec">Tank / Water</h2>
+  <div class="row">
+    <label><span>水槽サイズ (幅)</span><span id="vTWidth">1.8m</span></label>
+    <input type="range" id="tWidth" min="0.8" max="3.5" step="0.1" value="1.8">
+  </div>
+  <div class="row">
+    <label><span>水槽サイズ (奥行)</span><span id="vTDepth">1.2m</span></label>
+    <input type="range" id="tDepth" min="0.6" max="2.5" step="0.1" value="1.2">
+  </div>
+  <div class="row">
+    <label><span>水面の向き</span></label>
+    <div class="btnrow">
+      <button id="orientH" class="active">水平(見下ろす)</button>
+      <button id="orientV">垂直(正面から)</button>
+    </div>
+  </div>
+  <div class="row">
+    <label><span>波の高さ</span><span id="vWave">1.0</span></label>
+    <input type="range" id="wave" min="0" max="2.5" step="0.05" value="1.0">
+  </div>
+  <div class="row">
+    <label><span>波の速さ</span><span id="vWaveSpeed">1.0</span></label>
+    <input type="range" id="waveSpeed" min="0.1" max="2.5" step="0.05" value="1.0">
+  </div>
+  <div class="row">
+    <label><span>水のぼやけ・屈折</span><span id="vRefract">1.0</span></label>
+    <input type="range" id="refract" min="0" max="3" step="0.05" value="1.0">
+  </div>
+
+  <h2 class="sec">Media</h2>
+  <div class="btnrow">
+    <button id="btnCam">Webカメラ</button>
+    <button id="btnFile">動画/画像</button>
+  </div>
+  <input type="file" id="fileInput" accept="video/*,image/*">
+  <div class="row">
+    <label><span>投影の明るさ</span><span id="vBright">1.0</span></label>
+    <input type="range" id="bright" min="0.2" max="2.5" step="0.05" value="1.0">
+  </div>
+
+  <h2 class="sec">Audience View</h2>
+  <div class="btnrow">
+    <button id="viewFront" class="active">正面</button>
+    <button id="viewSide">斜め</button>
+    <button id="viewAbove">上から</button>
+  </div>
+  <p class="sub" style="margin:0 0 6px;">ドラッグで自由に視点変更 / ホイールでズーム</p>
+
+  <h2 class="sec">Export</h2>
+  <div class="btnrow">
+    <button id="btnRecord" class="record">● 録画開始</button>
+  </div>
+  <p class="sub" style="margin:0;">録画停止で自動的にwebm動画がダウンロードされます(Chrome / Edge推奨)。</p>
+</div>
+
+<div id="hint">H キーでUIの表示/非表示 &nbsp;|&nbsp; ドラッグで視点変更 &nbsp;|&nbsp; クリックで水面に波紋</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x03040a, 0.055);
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.05, 100);
+
+// ============ room ============
+const roomMats = {
+  blackbox: new THREE.MeshStandardMaterial({ color:0x050608, roughness:0.9 }),
+  gallery:  new THREE.MeshStandardMaterial({ color:0xd8dadd, roughness:0.85 }),
+  museum:   new THREE.MeshStandardMaterial({ color:0x5b5449, roughness:0.95 }),
+};
+const floorMat = new THREE.MeshStandardMaterial({ color:0x0a0c10, roughness:0.35, metalness:0.5 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(14,14), floorMat);
+floor.rotation.x = -Math.PI/2;
+scene.add(floor);
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(14,7), roomMats.blackbox);
+backWall.position.set(0,3.5,-4);
+scene.add(backWall);
+const sideWallL = new THREE.Mesh(new THREE.PlaneGeometry(8,7), roomMats.blackbox);
+sideWallL.position.set(-5,3.5,0); sideWallL.rotation.y = Math.PI/2;
+scene.add(sideWallL);
+const sideWallR = sideWallL.clone();
+sideWallR.position.set(5,3.5,0); sideWallR.rotation.y = -Math.PI/2;
+scene.add(sideWallR);
+
+const amb = new THREE.AmbientLight(0x334066, 0.35);
+scene.add(amb);
+const rim = new THREE.PointLight(0x6fa0ff, 0.4, 20);
+rim.position.set(0,4,3);
+scene.add(rim);
+
+function setRoomType(type){
+  const mat = roomMats[type];
+  backWall.material = mat; sideWallL.material = mat; sideWallR.material = mat;
+}
+
+// ============ media source ============
+const placeholderCanvas = document.createElement('canvas');
+placeholderCanvas.width = 512; placeholderCanvas.height = 512;
+const pctx = placeholderCanvas.getContext('2d');
+function drawPlaceholder(t){
+  const w=512,h=512;
+  pctx.fillStyle = '#05070c'; pctx.fillRect(0,0,w,h);
+  pctx.save();
+  pctx.translate(w/2, h/2+30);
+  const sway = Math.sin(t*0.9)*0.25;
+  pctx.rotate(sway*0.3);
+  pctx.fillStyle = '#dfefff';
+  pctx.beginPath(); pctx.ellipse(0,-40,26,70,0,0,Math.PI*2); pctx.fill();
+  pctx.beginPath(); pctx.arc(0,-130,22,0,Math.PI*2); pctx.fill();
+  const armA = Math.sin(t*1.1)*1.1;
+  pctx.save(); pctx.translate(-20,-70); pctx.rotate(-1.1+armA); pctx.fillRect(-8,0,16,90); pctx.restore();
+  pctx.save(); pctx.translate(20,-70); pctx.rotate(1.1-armA); pctx.fillRect(-8,0,16,90); pctx.restore();
+  const legA = Math.cos(t*0.9)*0.5;
+  pctx.save(); pctx.translate(-14,25); pctx.rotate(legA); pctx.fillRect(-9,0,18,120); pctx.restore();
+  pctx.save(); pctx.translate(14,25); pctx.rotate(-legA); pctx.fillRect(-9,0,18,120); pctx.restore();
+  pctx.restore();
+}
+drawPlaceholder(0);
+const placeholderTex = new THREE.CanvasTexture(placeholderCanvas);
+let mediaTex = placeholderTex;
+let usingPlaceholder = true;
+let videoEl = null;
+
+// ============ virtual projector ============
+const projectorGroup = new THREE.Group();
+scene.add(projectorGroup);
+const projBody = new THREE.Mesh(
+  new THREE.BoxGeometry(0.35,0.18,0.5),
+  new THREE.MeshStandardMaterial({ color:0x1a1c22, roughness:0.4, metalness:0.6 })
+);
+projectorGroup.add(projBody);
+const lensGlow = new THREE.Mesh(
+  new THREE.CircleGeometry(0.05,16),
+  new THREE.MeshBasicMaterial({ color:0xbfe0ff })
+);
+lensGlow.position.z = 0.26;
+projectorGroup.add(lensGlow);
+
+// throw-cone wireframe (visual only)
+const coneMat = new THREE.MeshBasicMaterial({ color:0xbfe0ff, transparent:true, opacity:0.06, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false });
+let coneMesh = null;
+function rebuildCone(fovDeg, dist){
+  if(coneMesh) projectorGroup.remove(coneMesh);
+  const r = Math.tan(THREE.MathUtils.degToRad(fovDeg/2)) * dist;
+  const geo = new THREE.ConeGeometry(r, dist, 24, 1, true);
+  geo.translate(0, -dist/2, 0);
+  geo.rotateX(Math.PI/2);
+  coneMesh = new THREE.Mesh(geo, coneMat);
+  projectorGroup.add(coneMesh);
+}
+
+// a dedicated camera representing the projector's own view, used purely for
+// computing the projective-texture matrix (never rendered to screen directly)
+const projectorCam = new THREE.PerspectiveCamera(38, 1, 0.3, 20);
+
+function updateProjector(){
+  const height = parseFloat(document.getElementById('pHeight').value);
+  const angle = parseFloat(document.getElementById('pAngle').value);
+  const dist = parseFloat(document.getElementById('pDist').value);
+  const fov = parseFloat(document.getElementById('pFov').value);
+
+  document.getElementById('vPHeight').textContent = height.toFixed(1)+'m';
+  document.getElementById('vPAngle').textContent = angle.toFixed(0)+'°';
+  document.getElementById('vPDist').textContent = dist.toFixed(1)+'m';
+  document.getElementById('vPFov').textContent = fov.toFixed(0)+'°';
+
+  // place projector behind/above tank, aimed at the water surface
+  const z = dist + tankGroup.position.z; // distance back from tank center along +Z
+  projectorGroup.position.set(0, height, z);
+  const aimPoint = new THREE.Vector3(0, waterY, tankGroup.position.z);
+  projectorGroup.lookAt(aimPoint);
+  projectorGroup.rotateX(Math.PI); // orient the cone/body forward correctly
+
+  projectorCam.position.copy(projectorGroup.position);
+  projectorCam.fov = fov;
+  projectorCam.aspect = 1.0;
+  projectorCam.lookAt(aimPoint);
+  projectorCam.updateProjectionMatrix();
+  projectorCam.updateMatrixWorld();
+
+  rebuildCone(fov, projectorGroup.position.distanceTo(aimPoint));
+
+  waterMat.uniforms.uProjMatrix.value.copy(projectorCam.projectionMatrix);
+  waterMat.uniforms.uProjViewMatrix.value.copy(projectorCam.matrixWorldInverse);
+}
+
+// ============ tank + water (projective-textured, procedural waves) ============
+let waterY = 0.55;
+const tankGroup = new THREE.Group();
+scene.add(tankGroup);
+
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color:0xbfe0ff, transparent:true, opacity:0.12, roughness:0.05, metalness:0,
+  transmission:0.6, side:THREE.DoubleSide, depthWrite:false,
+});
+let glassMesh = new THREE.Mesh(new THREE.BoxGeometry(1.8,1.1,1.2), glassMat);
+tankGroup.add(glassMesh);
+
+const waterVert = `
+  varying vec3 vWorldPos;
+  varying vec3 vNormalW;
+  uniform float uTime, uWaveH, uWaveSpeed, uVertical;
+  uniform vec4 uClicks[6]; // xy=local pos(-1..1 space), z=startTime, w=strength
+
+  float waveHeight(vec2 p){
+    float h = 0.0;
+    h += sin(p.x*2.2 + uTime*uWaveSpeed*1.3) * 0.5;
+    h += sin(p.y*3.1 - uTime*uWaveSpeed*1.7 + 1.0) * 0.35;
+    h += sin((p.x+p.y)*1.6 + uTime*uWaveSpeed*0.9) * 0.25;
+    for(int i=0;i<6;i++){
+      vec4 c = uClicks[i];
+      float age = uTime - c.z;
+      if(age >= 0.0 && age < 3.0){
+        float d = distance(p, c.xy);
+        float ring = sin(d*10.0 - age*6.0) * exp(-d*2.2) * exp(-age*1.0) * c.w;
+        h += ring;
+      }
+    }
+    return h;
+  }
+
+  void main(){
+    vec3 pos = position;
+    bool vertical = uVertical > 0.5;
+    // "horizontal" = a flat surface viewed from above (looking down into a tank);
+    // "vertical" = a standing surface viewed face-on (looking through the front
+    // glass, like the ballerina reference). The plane geometry itself is never
+    // rotated — we just pick which local axes are "in-plane" vs "bulge" here,
+    // so the same wave function drives both orientations.
+    vec2 inPlane = vertical ? pos.xy : pos.xz;
+    float h = waveHeight(inPlane) * uWaveH * 0.05;
+    if(vertical){ pos.z += h; } else { pos.y += h; }
+
+    float eps = 0.05;
+    float hA = waveHeight(inPlane + vec2(eps,0.0)) * uWaveH * 0.05;
+    float hB = waveHeight(inPlane + vec2(0.0,eps)) * uWaveH * 0.05;
+    vec3 tangentA, tangentB;
+    if(vertical){
+      tangentA = normalize(vec3(eps, 0.0, hA-h));
+      tangentB = normalize(vec3(0.0, eps, hB-h));
+    } else {
+      tangentA = normalize(vec3(0.0, hB-h, eps));
+      tangentB = normalize(vec3(eps, hA-h, 0.0));
+    }
+    vNormalW = normalize(cross(tangentA, tangentB));
+
+    vec4 wp = modelMatrix * vec4(pos,1.0);
+    vWorldPos = wp.xyz;
+    gl_Position = projectionMatrix * viewMatrix * wp;
+  }
+`;
+const waterFrag = `
+  precision highp float;
+  varying vec3 vWorldPos;
+  varying vec3 vNormalW;
+  uniform sampler2D uMedia;
+  uniform mat4 uProjMatrix, uProjViewMatrix;
+  uniform float uBrightness, uVertical, uRefract;
+
+  vec3 sampleMediaBlur(vec2 uv, float r){
+    if(r < 0.0006) return texture2D(uMedia, uv).rgb;
+    vec3 sum = texture2D(uMedia, clamp(uv,0.0,1.0)).rgb * 2.0;
+    float total = 2.0;
+    for(int i=0;i<8;i++){
+      float a = float(i)/8.0 * 6.28318;
+      vec2 off = vec2(cos(a), sin(a)) * r;
+      sum += texture2D(uMedia, clamp(uv+off,0.0,1.0)).rgb;
+      total += 1.0;
+    }
+    return sum/total;
+  }
+
+  void main(){
+    // the "at-rest" surface normal points up (0,1,0) for the horizontal tank,
+    // or toward the audience (0,0,1) for the vertical/front-viewing tank
+    vec3 restNormal = uVertical > 0.5 ? vec3(0.0,0.0,1.0) : vec3(0.0,1.0,0.0);
+    vec3 n = normalize(vNormalW);
+    // how far this point on the surface is tilted away from resting flat —
+    // 0 on calm water, higher on a wave crest/trough
+    float slope = 1.0 - clamp(dot(n, restNormal), 0.0, 1.0);
+
+    // refract the sample point using the wave normal — the offset scales with
+    // both the user-controlled strength AND how tilted the water is locally,
+    // so the image visibly warps/ripples instead of staying almost static
+    vec3 refractedPos = vWorldPos + n * uRefract * (0.02 + slope*0.35);
+
+    vec4 pc = uProjMatrix * uProjViewMatrix * vec4(refractedPos,1.0);
+    vec2 uv = (pc.xy/pc.w) * 0.5 + 0.5;
+    float inFrustum = (pc.w > 0.0 && uv.x>0.0 && uv.x<1.0 && uv.y>0.0 && uv.y<1.0) ? 1.0 : 0.0;
+    float edge = smoothstep(0.0,0.06,uv.x)*smoothstep(1.0,0.94,uv.x)*smoothstep(0.0,0.06,uv.y)*smoothstep(1.0,0.94,uv.y);
+
+    // water inherently softens whatever passes through it — a mild blur even
+    // on calm areas, growing stronger where the surface is disturbed
+    float blurAmt = uRefract * (0.0035 + slope*0.03);
+    vec3 media = sampleMediaBlur(uv, blurAmt);
+
+    float fres = pow(1.0 - max(dot(n, restNormal),0.0), 2.0);
+
+    // faint caustic sparkle where wave crests focus/scatter light
+    float caustic = pow(clamp(slope*1.6, 0.0, 1.0), 1.7) * uRefract;
+    vec3 causticCol = vec3(0.55,0.85,1.0) * caustic * 0.6 * inFrustum;
+
+    vec3 waterBase = vec3(0.03,0.08,0.13) + fres*vec3(0.1,0.25,0.35);
+    vec3 col = waterBase + media * inFrustum * edge * uBrightness * (0.8+0.3*fres) + causticCol;
+
+    gl_FragColor = vec4(col, 0.92);
+  }
+`;
+let waterVertical = false;
+const waterMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime:{value:0}, uWaveH:{value:1.0}, uWaveSpeed:{value:1.0}, uVertical:{value:0.0},
+    uClicks:{value:new Array(6).fill(0).map(()=>new THREE.Vector4(0,0,-10,0))},
+    uMedia:{value:mediaTex},
+    uProjMatrix:{value:new THREE.Matrix4()},
+    uProjViewMatrix:{value:new THREE.Matrix4()},
+    uBrightness:{value:1.0},
+    uRefract:{value:1.0},
+  },
+  vertexShader: waterVert, fragmentShader: waterFrag,
+  transparent:true, side:THREE.DoubleSide,
+});
+let waterGeo = new THREE.PlaneGeometry(1.7,1.1,80,60);
+waterGeo.rotateX(-Math.PI/2);
+let waterMesh = new THREE.Mesh(waterGeo, waterMat);
+tankGroup.add(waterMesh);
+
+let clickIdx = 0;
+function addClick(localX, localZ, strength){
+  const arr = waterMat.uniforms.uClicks.value;
+  arr[clickIdx].set(localX, localZ, clock.getElapsedTime(), strength);
+  clickIdx = (clickIdx+1)%arr.length;
+}
+
+function rebuildTank(){
+  const w = parseFloat(document.getElementById('tWidth').value);
+  const d = parseFloat(document.getElementById('tDepth').value);
+  document.getElementById('vTWidth').textContent = w.toFixed(1)+'m';
+  document.getElementById('vTDepth').textContent = d.toFixed(1)+'m';
+
+  tankGroup.remove(glassMesh); glassMesh.geometry.dispose();
+  glassMesh = new THREE.Mesh(new THREE.BoxGeometry(w, 1.1, d), glassMat);
+  glassMesh.position.y = waterY;
+  tankGroup.add(glassMesh);
+
+  tankGroup.remove(waterMesh); waterMesh.geometry.dispose();
+  if(waterVertical){
+    // stands upright facing the audience/projector, like a front-viewed tank
+    waterGeo = new THREE.PlaneGeometry(w*0.94, 1.1*0.9, 80, 60);
+  } else {
+    // lies flat, viewed from above at an angle
+    waterGeo = new THREE.PlaneGeometry(w*0.94, d*0.94, 80, 60);
+    waterGeo.rotateX(-Math.PI/2);
+  }
+  waterMat.uniforms.uVertical.value = waterVertical ? 1.0 : 0.0;
+  waterMesh = new THREE.Mesh(waterGeo, waterMat);
+  waterMesh.position.y = waterY;
+  tankGroup.add(waterMesh);
+
+  updateProjector();
+}
+tankGroup.position.set(0, 0, -0.6);
+glassMesh.position.y = 0.55;
+
+// tank stand
+const standMat = new THREE.MeshStandardMaterial({ color:0x111318, roughness:0.6 });
+const stand = new THREE.Mesh(new THREE.BoxGeometry(1.9,1.1,1.3), standMat);
+stand.position.set(0,-0.55,-0.6);
+scene.add(stand);
+
+// ============ custom orbit camera (no external deps) ============
+let camTheta = 0.35, camPhi = 1.15, camRadius = 4.2, camTarget = new THREE.Vector3(0,0.5,-0.6);
+function updateCameraFromOrbit(){
+  const x = camTarget.x + camRadius*Math.sin(camPhi)*Math.sin(camTheta);
+  const y = camTarget.y + camRadius*Math.cos(camPhi);
+  const z = camTarget.z + camRadius*Math.sin(camPhi)*Math.cos(camTheta);
+  camera.position.set(x,y,z);
+  camera.lookAt(camTarget);
+}
+updateCameraFromOrbit();
+
+let dragging = false, lastX=0, lastY=0;
+canvas.addEventListener('pointerdown', (e)=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; });
+window.addEventListener('pointerup', ()=> dragging=false);
+window.addEventListener('pointermove', (e)=>{
+  if(!dragging) return;
+  const dx = e.clientX-lastX, dy = e.clientY-lastY;
+  lastX=e.clientX; lastY=e.clientY;
+  camTheta -= dx*0.006;
+  camPhi = Math.min(Math.max(camPhi - dy*0.006, 0.25), Math.PI-0.15);
+  updateCameraFromOrbit();
+  setActiveViewBtn(null);
+});
+canvas.addEventListener('wheel', (e)=>{
+  camRadius = Math.min(Math.max(camRadius + e.deltaY*0.003, 1.5), 9);
+  updateCameraFromOrbit();
+}, {passive:true});
+
+// click (not drag) on the water area -> ripple
+let downX=0, downY=0;
+canvas.addEventListener('pointerdown', (e)=>{ downX=e.clientX; downY=e.clientY; });
+canvas.addEventListener('pointerup', (e)=>{
+  if(Math.abs(e.clientX-downX)<4 && Math.abs(e.clientY-downY)<4){
+    const rect = canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1);
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, camera);
+    const hit = raycaster.intersectObject(waterMesh)[0];
+    if(hit){
+      const local = waterMesh.worldToLocal(hit.point.clone());
+      addClick(local.x, local.z, 1.2);
+    }
+  }
+});
+
+function setActiveViewBtn(id){
+  ['viewFront','viewSide','viewAbove'].forEach(b=> document.getElementById(b).classList.toggle('active', b===id));
+}
+document.getElementById('viewFront').addEventListener('click', ()=>{
+  camTheta=0; camPhi=1.15; camRadius=4.2; updateCameraFromOrbit(); setActiveViewBtn('viewFront');
+});
+document.getElementById('viewSide').addEventListener('click', ()=>{
+  camTheta=0.85; camPhi=1.2; camRadius=4.0; updateCameraFromOrbit(); setActiveViewBtn('viewSide');
+});
+document.getElementById('viewAbove').addEventListener('click', ()=>{
+  camTheta=0.2; camPhi=0.45; camRadius=4.6; updateCameraFromOrbit(); setActiveViewBtn('viewAbove');
+});
+
+function setOrientationBtn(vertical){
+  document.getElementById('orientH').classList.toggle('active', !vertical);
+  document.getElementById('orientV').classList.toggle('active', vertical);
+}
+document.getElementById('orientH').addEventListener('click', ()=>{
+  waterVertical = false; setOrientationBtn(false); rebuildTank();
+});
+document.getElementById('orientV').addEventListener('click', ()=>{
+  waterVertical = true; setOrientationBtn(true); rebuildTank();
+});
+
+// ============ resize / animate ============
+function resize(){
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+window.addEventListener('resize', resize);
+
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.elapsedTime;
+
+  if(usingPlaceholder){
+    drawPlaceholder(t);
+    placeholderTex.needsUpdate = true;
+  } else if(videoEl && videoEl.readyState >= (videoEl.HAVE_CURRENT_DATA||2)){
+    mediaTex.needsUpdate = true;
+  }
+
+  waterMat.uniforms.uTime.value = t;
+  lensGlow.material.color.setHSL(0.55, 0.6, 0.6+0.2*Math.sin(t*3.0));
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// ============ UI wiring ============
+document.getElementById('roomType').addEventListener('change', (e)=> setRoomType(e.target.value));
+['pHeight','pAngle','pDist','pFov'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', updateProjector);
+});
+['tWidth','tDepth'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', rebuildTank);
+});
+document.getElementById('wave').addEventListener('input', (e)=>{
+  waterMat.uniforms.uWaveH.value = parseFloat(e.target.value);
+  document.getElementById('vWave').textContent = e.target.value;
+});
+document.getElementById('waveSpeed').addEventListener('input', (e)=>{
+  waterMat.uniforms.uWaveSpeed.value = parseFloat(e.target.value);
+  document.getElementById('vWaveSpeed').textContent = e.target.value;
+});
+document.getElementById('refract').addEventListener('input', (e)=>{
+  waterMat.uniforms.uRefract.value = parseFloat(e.target.value);
+  document.getElementById('vRefract').textContent = e.target.value;
+});
+document.getElementById('bright').addEventListener('input', (e)=>{
+  waterMat.uniforms.uBrightness.value = parseFloat(e.target.value);
+  document.getElementById('vBright').textContent = e.target.value;
+});
+
+document.getElementById('btnCam').addEventListener('click', async ()=>{
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:1280, height:720 } });
+    videoEl = document.createElement('video');
+    videoEl.srcObject = stream; videoEl.muted = true; videoEl.playsInline = true;
+    await videoEl.play();
+    setActiveVideo(videoEl);
+  }catch(e){ alert('カメラを開始できませんでした: '+e.message); }
+});
+document.getElementById('btnFile').addEventListener('click', ()=> document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const url = URL.createObjectURL(file);
+  if(file.type.startsWith('video')){
+    videoEl = document.createElement('video');
+    videoEl.src=url; videoEl.loop=true; videoEl.muted=true; videoEl.playsInline=true;
+    videoEl.play(); setActiveVideo(videoEl);
+  } else if(file.type.startsWith('image')){
+    const img = new Image();
+    img.onload = ()=>{
+      const tex = new THREE.Texture(img); tex.needsUpdate = true;
+      usingPlaceholder = false; mediaTex = tex; waterMat.uniforms.uMedia.value = tex;
+    };
+    img.src = url;
+  }
+});
+function setActiveVideo(v){
+  const tex = new THREE.VideoTexture(v);
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+  usingPlaceholder = false; mediaTex = tex; waterMat.uniforms.uMedia.value = tex;
+}
+
+// ============ recording (MediaRecorder + canvas.captureStream) ============
+let recorder = null, recChunks = [], recStart = 0, recTimerId = null;
+const recBtn = document.getElementById('btnRecord');
+const recIndicator = document.getElementById('recIndicator');
+recBtn.addEventListener('click', ()=>{
+  if(!recorder || recorder.state === 'inactive'){
+    startRecording();
+  } else {
+    stopRecording();
+  }
+});
+function startRecording(){
+  const stream = canvas.captureStream(30);
+  let mime = 'video/webm;codecs=vp9';
+  if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8';
+  if(!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+  try{
+    recorder = new MediaRecorder(stream, {mimeType:mime, videoBitsPerSecond:8_000_000});
+  }catch(err){
+    alert('この環境では録画に対応していません。Chrome / Edgeでお試しください。');
+    return;
+  }
+  recChunks = [];
+  recorder.ondataavailable = (e)=> { if(e.data.size>0) recChunks.push(e.data); };
+  recorder.onstop = ()=>{
+    const blob = new Blob(recChunks, {type:'video/webm'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'installation_preview.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  };
+  recorder.start();
+  recStart = performance.now();
+  recBtn.textContent = '■ 録画停止';
+  recBtn.classList.add('on');
+  recIndicator.classList.add('show');
+  recTimerId = setInterval(()=>{
+    const s = Math.floor((performance.now()-recStart)/1000);
+    document.getElementById('recTime').textContent = Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  }, 250);
+}
+function stopRecording(){
+  if(recorder && recorder.state !== 'inactive') recorder.stop();
+  recBtn.textContent = '● 録画開始';
+  recBtn.classList.remove('on');
+  recIndicator.classList.remove('show');
+  clearInterval(recTimerId);
+}
+
+// ============ mobile menu toggle ============
+let uiOpen = !window.matchMedia('(max-width: 768px)').matches;
+function setUiOpen(open){
+  uiOpen = open;
+  document.getElementById('ui').classList.toggle('open', open);
+  document.getElementById('ui').classList.toggle('closed', !open);
+  document.getElementById('hint').classList.toggle('open', open);
+  document.getElementById('hint').classList.toggle('closed', !open);
+}
+window.addEventListener('keydown', (e)=>{ if(e.key.toLowerCase()==='h') setUiOpen(!uiOpen); });
+document.getElementById('menuBtn').addEventListener('click', ()=> setUiOpen(!uiOpen));
+
+// ============ init ============
+rebuildTank();
+</script>
+</body>
+</html>
